@@ -128,6 +128,24 @@ const plainMoney = (n) =>
     maximumFractionDigits: 2,
   });
 function toExportRow(invoice, index) {
+  const itemsTotal = (invoice.items || []).reduce(
+    (sum, it) =>
+      sum + (Number(it.qty) || 0) * (Number(it.rate) || 0),
+    0
+  );
+
+  const discount = Number(invoice.discount) || 0;
+
+  const taxableValue = itemsTotal - discount;
+
+  const cgstPercent = Number(invoice.cgstPercent) || 0;
+
+  const sgstPercent = Number(invoice.sgstPercent) || 0;
+
+  const cgstAmount = (taxableValue * cgstPercent) / 100;
+
+  const sgstAmount = (taxableValue * sgstPercent) / 100;
+
   return {
     sno: index + 1,
 
@@ -144,6 +162,9 @@ function toExportRow(invoice, index) {
 
     // Company GSTIN
     gstNo: invoice.company?.gstin || "",
+
+    // Customer / Bill-To GSTIN
+    customerGstNo: invoice.billTo?.gstin || "",
 
     billTo: invoice.billTo?.name || "",
 
@@ -163,6 +184,12 @@ function toExportRow(invoice, index) {
     driverPhone:
       invoice.transport?.driverPhone || "",
 
+    taxableValue,
+
+    cgstAmount,
+
+    sgstAmount,
+
     amount:
       Number(invoice.grandTotal) || 0,
   };
@@ -181,6 +208,7 @@ async function exportToExcel(rows) {
     "Date",
     "Type",
     "GST No.",
+    "Customer GST No.",
     "Bill To",
     "Mobile",
     "Ship To",
@@ -188,10 +216,34 @@ async function exportToExcel(rows) {
     "Vehicle No.",
     "Driver Name",
     "Driver Phone",
-    "Amount (Rs.)",
+    "Taxable Value (Rs.)",
+    "CGST (Rs.)",
+    "SGST (Rs.)",
+    "Total Amount (Rs.)",
   ];
 
+  const TAXABLE_COL = header.indexOf("Taxable Value (Rs.)");
+
+  const CGST_COL = header.indexOf("CGST (Rs.)");
+
+  const SGST_COL = header.indexOf("SGST (Rs.)");
+
   const AMOUNT_COL = header.length - 1;
+
+  const totalTaxable = rows.reduce(
+    (sum, r) => sum + r.taxableValue,
+    0
+  );
+
+  const totalCgst = rows.reduce(
+    (sum, r) => sum + r.cgstAmount,
+    0
+  );
+
+  const totalSgst = rows.reduce(
+    (sum, r) => sum + r.sgstAmount,
+    0
+  );
 
   const totalAmount = rows.reduce(
     (sum, r) => sum + r.amount,
@@ -204,6 +256,7 @@ async function exportToExcel(rows) {
     r.date,
     r.type,
     r.gstNo,
+    r.customerGstNo,
     r.billTo,
     r.mobile,
     r.shipTo,
@@ -211,12 +264,21 @@ async function exportToExcel(rows) {
     r.vehicleNo,
     r.driverName,
     r.driverPhone,
+    r.taxableValue,
+    r.cgstAmount,
+    r.sgstAmount,
     r.amount,
   ]);
 
   const totalRow = header.map(() => "");
 
-  totalRow[AMOUNT_COL - 1] = "Total";
+  totalRow[TAXABLE_COL - 1] = "Total";
+
+  totalRow[TAXABLE_COL] = totalTaxable;
+
+  totalRow[CGST_COL] = totalCgst;
+
+  totalRow[SGST_COL] = totalSgst;
 
   totalRow[AMOUNT_COL] = totalAmount;
 
@@ -232,6 +294,7 @@ async function exportToExcel(rows) {
     { wch: 14 },  // Date
     { wch: 11 },  // Type
     { wch: 20 },  // GST No.
+    { wch: 20 },  // Customer GST No.
     { wch: 26 },  // Bill To
     { wch: 15 },  // Mobile
     { wch: 26 },  // Ship To
@@ -239,28 +302,35 @@ async function exportToExcel(rows) {
     { wch: 15 },  // Vehicle No.
     { wch: 20 },  // Driver Name
     { wch: 16 },  // Driver Phone
-    { wch: 16 },  // Amount
+    { wch: 18 },  // Taxable Value
+    { wch: 14 },  // CGST
+    { wch: 14 },  // SGST
+    { wch: 18 },  // Total Amount
   ];
 
-  // Amount column as real numeric value
+  // Numeric columns as real numeric values
   // with Indian 2-decimal format
   for (
     let r = 1;
     r <= rows.length + 1;
     r += 1
   ) {
-    const cell =
-      sheet[
-        XLSX.utils.encode_cell({
-          r,
-          c: AMOUNT_COL,
-        })
-      ];
+    [TAXABLE_COL, CGST_COL, SGST_COL, AMOUNT_COL].forEach(
+      (col) => {
+        const cell =
+          sheet[
+            XLSX.utils.encode_cell({
+              r,
+              c: col,
+            })
+          ];
 
-    if (cell) {
-      cell.t = "n";
-      cell.z = "#,##0.00";
-    }
+        if (cell) {
+          cell.t = "n";
+          cell.z = "#,##0.00";
+        }
+      }
+    );
   }
 
   // Freeze header row
@@ -292,6 +362,21 @@ async function exportToPdf(rows, filterText) {
     unit: "pt",
     format: "a4",
   });
+
+  const totalTaxable = rows.reduce(
+    (sum, r) => sum + r.taxableValue,
+    0
+  );
+
+  const totalCgst = rows.reduce(
+    (sum, r) => sum + r.cgstAmount,
+    0
+  );
+
+  const totalSgst = rows.reduce(
+    (sum, r) => sum + r.sgstAmount,
+    0
+  );
 
   const totalAmount = rows.reduce(
     (sum, r) => sum + r.amount,
@@ -351,10 +436,13 @@ async function exportToPdf(rows, filterText) {
         "Date",
         "Type",
         "GST No.",
+        "Customer GST No.",
         "Bill To",
-        "Mobile",
         "Vehicle No.",
-        "Amount (Rs.)",
+        "Taxable (Rs.)",
+        "CGST (Rs.)",
+        "SGST (Rs.)",
+        "Total (Rs.)",
       ],
     ],
 
@@ -364,9 +452,12 @@ async function exportToPdf(rows, filterText) {
       r.date,
       r.type,
       r.gstNo || "-",
+      r.customerGstNo || "-",
       r.billTo || "-",
-      r.mobile || "-",
       r.vehicleNo || "-",
+      plainMoney(r.taxableValue),
+      plainMoney(r.cgstAmount),
+      plainMoney(r.sgstAmount),
       plainMoney(r.amount),
     ]),
 
@@ -380,13 +471,16 @@ async function exportToPdf(rows, filterText) {
           },
         },
 
+        plainMoney(totalTaxable),
+        plainMoney(totalCgst),
+        plainMoney(totalSgst),
         plainMoney(totalAmount),
       ],
     ],
 
     styles: {
-      fontSize: 8,
-      cellPadding: 4,
+      fontSize: 7,
+      cellPadding: 3,
       lineColor: [225, 232, 240],
       lineWidth: 0.5,
       textColor: [23, 32, 51],
@@ -409,41 +503,56 @@ async function exportToPdf(rows, filterText) {
     columnStyles: {
       0: {
         halign: "center",
-        cellWidth: 38,
+        cellWidth: 32,
       },
 
       1: {
-        cellWidth: 105,
+        cellWidth: 85,
         fontStyle: "bold",
       },
 
       2: {
-        cellWidth: 72,
-      },
-
-      3: {
         cellWidth: 60,
       },
 
+      3: {
+        cellWidth: 50,
+      },
+
       4: {
-        cellWidth: 105,
+        cellWidth: 85,
       },
 
       5: {
-        cellWidth: "auto",
+        cellWidth: 85,
       },
 
       6: {
-        cellWidth: 78,
+        cellWidth: "auto",
       },
 
       7: {
-        cellWidth: 78,
+        cellWidth: 65,
       },
 
       8: {
         halign: "right",
-        cellWidth: 88,
+        cellWidth: 60,
+      },
+
+      9: {
+        halign: "right",
+        cellWidth: 58,
+      },
+
+      10: {
+        halign: "right",
+        cellWidth: 58,
+      },
+
+      11: {
+        halign: "right",
+        cellWidth: 65,
       },
     },
   });
